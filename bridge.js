@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   hideTopLive: false,
   hideTodaysNews: false,
   fixVideoScrollbar: true,
+  videoScrollbarColor: '#ffffff',
   hideBookmarksButton: false,
 };
 

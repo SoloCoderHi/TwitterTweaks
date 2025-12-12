@@ -44,6 +44,7 @@ let config = {
   hideTopLive: false,
   hideTodaysNews: false,
   fixVideoScrollbar: true,
+  videoScrollbarColor: '#ffffff',
   hideBookmarksButton: false,
 };
 
@@ -552,22 +553,34 @@ function applyStyles() {
 
   // Fix Video Scrollbar
   if (config.fixVideoScrollbar) {
+    const scrollbarColor = config.videoScrollbarColor || '#ffffff';
+    // Convert hex to rgba
+    const r = parseInt(scrollbarColor.slice(1, 3), 16);
+    const g = parseInt(scrollbarColor.slice(3, 5), 16);
+    const b = parseInt(scrollbarColor.slice(5, 7), 16);
+    
     css += `
-      /* Make video scrollbar visible on dark background */
-      video::-webkit-media-controls-timeline,
-      video::-webkit-media-controls {
-        filter: brightness(1.5) contrast(1.2);
+      /* Custom colored scrollbar for videos */
+      video::-webkit-media-controls-timeline {
+        background-color: rgba(${r}, ${g}, ${b}, 0.3) !important;
       }
       
-      /* Alternative: Custom scrollbar for video containers */
-      div[data-testid="videoComponent"] video::-webkit-media-controls-timeline {
-        background-color: rgba(255, 255, 255, 0.3) !important;
+      video::-webkit-media-controls-seek-back-button,
+      video::-webkit-media-controls-seek-forward-button,
+      video::-webkit-media-controls-play-button,
+      video::-webkit-media-controls-current-time-display,
+      video::-webkit-media-controls-time-remaining-display {
+        color: ${scrollbarColor} !important;
+        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
       }
       
-      div[data-testid="videoComponent"] video::-webkit-media-controls-current-time-display,
-      div[data-testid="videoComponent"] video::-webkit-media-controls-time-remaining-display {
-        color: white !important;
-        text-shadow: 0 0 3px black !important;
+      video::-webkit-media-controls-volume-slider {
+        background-color: rgba(${r}, ${g}, ${b}, 0.3) !important;
+      }
+      
+      /* Enhanced visibility */
+      video::-webkit-media-controls-enclosure {
+        background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.7) 100%) !important;
       }
     `;
   }
@@ -1139,7 +1152,13 @@ function triggerDownload(url, filename) {
 // ==========================================
 // VIDEO ENHANCEMENTS
 // ==========================================
+const processedVideos = new WeakMap();
+
 function enhanceVideo(video) {
+  // Prevent duplicate processing
+  if (processedVideos.has(video)) return;
+  processedVideos.set(video, true);
+  
   // Enable loop playback
   if (config.enableVideoLoop) {
     video.loop = true;
@@ -1148,26 +1167,42 @@ function enhanceVideo(video) {
 
   // Enable autoplay (with observer for when video enters viewport)
   if (config.enableVideoAutoplay) {
-    video.muted = true; // Required for autoplay to work
+    // Don't auto-mute if user hasn't muted
+    const wasMuted = video.muted;
     
     // Use Intersection Observer to autoplay when video is in viewport
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const playPromise = video.play();
-          if (playPromise !== undefined) {
-            playPromise.catch(error => {
-              // Autoplay was prevented
-              console.log("Autoplay prevented:", error);
-            });
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
+          // Video is mostly in view - try to play
+          if (video.paused) {
+            const playPromise = video.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(error => {
+                // Autoplay was prevented - mute and try again
+                if (!wasMuted && error.name === 'NotAllowedError') {
+                  video.muted = true;
+                  video.play().catch(e => console.log("Autoplay still prevented:", e));
+                }
+              });
+            }
           }
-        } else {
-          video.pause();
+        } else if (entry.intersectionRatio < 0.25) {
+          // Video is mostly out of view - pause it
+          if (!video.paused && video.currentTime > 0) {
+            video.pause();
+          }
         }
       });
-    }, { threshold: 0.5 });
+    }, { 
+      threshold: [0, 0.25, 0.5, 0.75, 1.0],
+      rootMargin: '50px'
+    });
     
     observer.observe(video);
+    
+    // Store observer for cleanup
+    processedVideos.set(video, { observer, wasMuted });
   }
 }
 
