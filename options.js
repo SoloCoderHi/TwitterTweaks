@@ -1,5 +1,5 @@
 /**
- * Twitter Tweek v5.1 - Options Page Script
+ * Twitter Tweek v5.2 - Options Page Script
  */
 
 const defaults = {
@@ -17,6 +17,13 @@ const defaults = {
   restoreTweetSource: true,
   showAccountLocation: true,
   hideFloatingButton: true,
+  hideDiscoverMore: false,
+  enableVideoLoop: false,
+  enableVideoAutoplay: false,
+  hideTopLive: false,
+  hideTodaysNews: false,
+  fixVideoScrollbar: true,
+  hideBookmarksButton: false,
 };
 
 // Display version

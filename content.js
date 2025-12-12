@@ -1,5 +1,5 @@
 /**
- * Twitter Tweek v5.1 - Content Script (MAIN World)
+ * Twitter Tweek v5.2 - Content Script (MAIN World)
  *
  * Features:
  * - API-level ad/promotion filtering
@@ -11,11 +11,14 @@
  * - Explore page cleanup
  * - Hide Grok, views, premium upsells
  * - Blue bird logo restoration
+ * - Video loop & autoplay options
+ * - Hide Discover More, Top Live, Today's News
+ * - Fixed video scrollbar visibility
  *
  * CSP-Safe: No inline event handlers
  */
 
-console.log("🐦 Twitter Tweek v5.1: Initializing...");
+console.log("🐦 Twitter Tweek v5.2: Initializing...");
 
 // ==========================================
 // CONFIGURATION
@@ -35,6 +38,13 @@ let config = {
   restoreTweetSource: true,
   showAccountLocation: true,
   hideFloatingButton: true,
+  hideDiscoverMore: false,
+  enableVideoLoop: false,
+  enableVideoAutoplay: false,
+  hideTopLive: false,
+  hideTodaysNews: false,
+  fixVideoScrollbar: true,
+  hideBookmarksButton: false,
 };
 
 let styleElement = null;
@@ -503,6 +513,78 @@ function applyStyles() {
     `;
   }
 
+  // Hide Discover More
+  if (config.hideDiscoverMore) {
+    css += `
+      /* Hide "Discover more" section in timeline */
+      [aria-label*="Discover more"],
+      [data-testid="cellInnerDiv"]:has([aria-label*="Discover more"]),
+      div:has(> div > h2:contains("Discover more")),
+      section[aria-labelledby*="accessible-list"]:has([aria-label*="Discover"]) {
+        display: none !important;
+      }
+    `;
+  }
+
+  // Hide Top Live
+  if (config.hideTopLive) {
+    css += `
+      /* Hide "Top Live" section */
+      [data-testid="cellInnerDiv"]:has([aria-label*="Top Live"]),
+      [aria-label*="Top Live"],
+      div:has(> div > h2:contains("Top Live")) {
+        display: none !important;
+      }
+    `;
+  }
+
+  // Hide Today's News
+  if (config.hideTodaysNews) {
+    css += `
+      /* Hide "Today's News" section */
+      [data-testid="cellInnerDiv"]:has([aria-label*="Today"]),
+      [aria-label*="Today's News"],
+      div:has(> div > h2:contains("Today")) {
+        display: none !important;
+      }
+    `;
+  }
+
+  // Fix Video Scrollbar
+  if (config.fixVideoScrollbar) {
+    css += `
+      /* Make video scrollbar visible on dark background */
+      video::-webkit-media-controls-timeline,
+      video::-webkit-media-controls {
+        filter: brightness(1.5) contrast(1.2);
+      }
+      
+      /* Alternative: Custom scrollbar for video containers */
+      div[data-testid="videoComponent"] video::-webkit-media-controls-timeline {
+        background-color: rgba(255, 255, 255, 0.3) !important;
+      }
+      
+      div[data-testid="videoComponent"] video::-webkit-media-controls-current-time-display,
+      div[data-testid="videoComponent"] video::-webkit-media-controls-time-remaining-display {
+        color: white !important;
+        text-shadow: 0 0 3px black !important;
+      }
+    `;
+  }
+
+  // Hide Bookmarks Button (in action bar)
+  if (config.hideBookmarksButton) {
+    css += `
+      /* Hide bookmark button in tweet action bar */
+      [data-testid="bookmark"],
+      [data-testid="removeBookmark"],
+      article [role="group"] > div:has([data-testid="bookmark"]),
+      article [role="group"] > div:has([data-testid="removeBookmark"]) {
+        display: none !important;
+      }
+    `;
+  }
+
   // Explore page cleanup
   if (config.hideExploreContent) {
     css += `
@@ -603,6 +685,17 @@ function startObserver() {
         // Restore tweet source and location
         if (config.restoreTweetSource || config.showAccountLocation) {
           enhanceFocusedTweet();
+        }
+
+        // Process videos for loop and autoplay
+        if (config.enableVideoLoop || config.enableVideoAutoplay) {
+          const videos = node.tagName === "VIDEO" ? [node] : node.querySelectorAll("video");
+          for (const video of videos) {
+            if (!processedElements.has(video)) {
+              processedElements.add(video);
+              enhanceVideo(video);
+            }
+          }
         }
       }
     }
@@ -1044,6 +1137,41 @@ function triggerDownload(url, filename) {
 }
 
 // ==========================================
+// VIDEO ENHANCEMENTS
+// ==========================================
+function enhanceVideo(video) {
+  // Enable loop playback
+  if (config.enableVideoLoop) {
+    video.loop = true;
+    video.setAttribute('loop', '');
+  }
+
+  // Enable autoplay (with observer for when video enters viewport)
+  if (config.enableVideoAutoplay) {
+    video.muted = true; // Required for autoplay to work
+    
+    // Use Intersection Observer to autoplay when video is in viewport
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(error => {
+              // Autoplay was prevented
+              console.log("Autoplay prevented:", error);
+            });
+          }
+        } else {
+          video.pause();
+        }
+      });
+    }, { threshold: 0.5 });
+    
+    observer.observe(video);
+  }
+}
+
+// ==========================================
 // FOCUSED TWEET ENHANCEMENTS
 // ==========================================
 function enhanceFocusedTweet() {
@@ -1103,35 +1231,32 @@ function enhanceFocusedTweet() {
   if (config.showAccountLocation && !focusedTweet.dataset.tweekLocation) {
     const location = locationCache.get(tweetId);
     if (location && location.trim()) {
-      // Find the metadata container (with views, etc)
+      focusedTweet.dataset.tweekLocation = "true";
+      
+      // Find the metadata container - try multiple approaches
       const timeElement = focusedTweet.querySelector('time');
       if (timeElement) {
         const timeLink = timeElement.closest('a');
         if (timeLink) {
-          // The next element after time link usually contains views
-          let metadataLine = timeLink.parentElement.nextElementSibling;
+          // Get the parent that contains the timestamp and other metadata
+          const timestampContainer = timeLink.parentElement;
           
-          // Alternative: find by aria-label or data-testid
-          if (!metadataLine) {
-            metadataLine = focusedTweet.querySelector('[aria-label*="View post analytics"], [href$="/analytics"]')?.parentElement?.parentElement;
-          }
-          
-          if (metadataLine) {
-            focusedTweet.dataset.tweekLocation = "true";
-            
+          if (timestampContainer) {
+            // Create location element to add after timestamp
             const separator = document.createElement("span");
             separator.setAttribute("aria-hidden", "true");
             separator.style.color = "rgb(113, 118, 123)";
-            separator.style.padding = "0 4px";
-            separator.textContent = "·";
+            separator.style.margin = "0 4px";
+            separator.textContent = " · ";
             
             const locSpan = document.createElement("span");
             locSpan.style.color = "rgb(113, 118, 123)";
+            locSpan.style.fontSize = "15px";
             locSpan.textContent = location;
             
-            // Append to the metadata line
-            metadataLine.appendChild(separator);
-            metadataLine.appendChild(locSpan);
+            // Append location right after the timestamp in the same container
+            timestampContainer.appendChild(separator);
+            timestampContainer.appendChild(locSpan);
           }
         }
       }
@@ -1156,7 +1281,7 @@ function init() {
   // Request settings from bridge
   window.dispatchEvent(new CustomEvent("TWEEK_REQUEST_SETTINGS"));
 
-  console.log("🐦 Twitter Tweek v5.1: Ready!");
+  console.log("🐦 Twitter Tweek v5.2: Ready!");
 }
 
 // Track share button clicks to identify which tweet's share was clicked

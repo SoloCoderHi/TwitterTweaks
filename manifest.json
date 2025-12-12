@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Twitter Tweek",
-  "version": "5.1",
+  "version": "5.2",
   "description": "Block ads, hide Grok, restore blue bird, download media, customize navigation, and more!",
   "permissions": [
     "downloads",

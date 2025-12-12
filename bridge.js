@@ -1,8 +1,8 @@
 /**
- * Twitter Tweek v5.1 - Bridge Script (ISOLATED World)
+ * Twitter Tweek v5.2 - Bridge Script (ISOLATED World)
  */
 
-console.log("🌉 Twitter Tweek Bridge v5.1: Starting...");
+console.log("🌉 Twitter Tweek Bridge v5.2: Starting...");
 
 const DEFAULT_SETTINGS = {
   enableDownloads: true,
@@ -19,6 +19,13 @@ const DEFAULT_SETTINGS = {
   restoreTweetSource: true,
   showAccountLocation: true,
   hideFloatingButton: true,
+  hideDiscoverMore: false,
+  enableVideoLoop: false,
+  enableVideoAutoplay: false,
+  hideTopLive: false,
+  hideTodaysNews: false,
+  fixVideoScrollbar: true,
+  hideBookmarksButton: false,
 };
 
 async function loadAndSendSettings() {
@@ -71,4 +78,4 @@ window.addEventListener("TWEEK_DOWNLOAD", async (e) => {
 loadAndSendSettings();
 setTimeout(loadAndSendSettings, 500);
 setTimeout(loadAndSendSettings, 2000);
-console.log("🌉 Twitter Tweek Bridge v5.1: Ready!");
+console.log("🌉 Twitter Tweek Bridge v5.2: Ready!");
