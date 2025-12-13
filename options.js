@@ -1,5 +1,5 @@
 /**
- * Twitter Tweek v5.2 - Options Page Script
+ * Twitter Tweek v5.3 - Options Page Script
  */
 
 const defaults = {
@@ -23,7 +23,7 @@ const defaults = {
   hideTopLive: false,
   hideTodaysNews: false,
   fixVideoScrollbar: true,
-  videoScrollbarColor: '#ffffff',
+  videoScrollbarColor: "#ffffff",
   hideBookmarksButton: false,
 };
 
@@ -44,9 +44,9 @@ function saveOptions() {
   for (const key in defaults) {
     const el = document.getElementById(key);
     if (el) {
-      if (el.type === 'checkbox') {
+      if (el.type === "checkbox") {
         settings[key] = el.checked;
-      } else if (el.type === 'color') {
+      } else if (el.type === "color") {
         settings[key] = el.value;
       } else {
         settings[key] = el.value;
@@ -68,9 +68,9 @@ function restoreOptions() {
     for (const key in defaults) {
       const el = document.getElementById(key);
       if (el) {
-        if (el.type === 'checkbox') {
+        if (el.type === "checkbox") {
           el.checked = items[key];
-        } else if (el.type === 'color') {
+        } else if (el.type === "color") {
           el.value = items[key] || defaults[key];
         } else {
           el.value = items[key];
@@ -87,7 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
   for (const checkbox of checkboxes) {
     checkbox.addEventListener("change", saveOptions);
   }
-  
+
   const colorPickers = document.querySelectorAll("input[type='color']");
   for (const picker of colorPickers) {
     picker.addEventListener("change", saveOptions);

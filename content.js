@@ -1,5 +1,5 @@
 /**
- * Twitter Tweek v5.2 - Content Script (MAIN World)
+ * Twitter Tweek v5.3 - Content Script (MAIN World)
  *
  * Features:
  * - API-level ad/promotion filtering
@@ -18,7 +18,7 @@
  * CSP-Safe: No inline event handlers
  */
 
-console.log("🐦 Twitter Tweek v5.2: Initializing...");
+console.log("🐦 Twitter Tweek v5.3: Initializing...");
 
 // ==========================================
 // CONFIGURATION
@@ -44,7 +44,7 @@ let config = {
   hideTopLive: false,
   hideTodaysNews: false,
   fixVideoScrollbar: true,
-  videoScrollbarColor: '#ffffff',
+  videoScrollbarColor: "#ffffff",
   hideBookmarksButton: false,
 };
 
@@ -143,10 +143,19 @@ function filterTimelineData(obj, depth = 0) {
 }
 
 // ==========================================
-// MEDIA EXTRACTION
+// MEDIA & DATA EXTRACTION
 // ==========================================
+
+// Cache for user data (location, etc.) by username
+const userDataCache = new Map();
+// Cache for tweet data (source, user info) by tweet ID
+const tweetDataCache = new Map();
+
 function extractMediaFromData(obj, depth = 0) {
   if (!obj || typeof obj !== "object" || depth > 25) return;
+
+  // Extract tweet data from any tweet object (with or without media)
+  extractTweetData(obj);
 
   const entities =
     obj.extended_entities?.media || obj.legacy?.extended_entities?.media;
@@ -175,17 +184,12 @@ function extractMediaFromData(obj, depth = 0) {
     // Extract tweet source
     if (obj.source) {
       source = obj.source;
-      // Clean up source HTML if present
       const sourceMatch = source.match(/>([^<]+)</);
-      if (sourceMatch) {
-        source = sourceMatch[1];
-      }
+      if (sourceMatch) source = sourceMatch[1];
     } else if (obj.legacy?.source) {
       source = obj.legacy.source;
       const sourceMatch = source.match(/>([^<]+)</);
-      if (sourceMatch) {
-        source = sourceMatch[1];
-      }
+      if (sourceMatch) source = sourceMatch[1];
     }
 
     if (tweetId) {
@@ -212,15 +216,13 @@ function extractMediaFromData(obj, depth = 0) {
 
       const cacheData = { user: username, media: mediaFiles };
       if (source) cacheData.source = source;
-      
+
       mediaCache.set(tweetId, cacheData);
 
-      // Cache location for display in focused tweets
       if (location) {
         locationCache.set(tweetId, location);
       }
 
-      // Also cache by thumbnail URL for matching
       entities.forEach((m) => {
         if (m.media_url_https) {
           const thumbKey = m.media_url_https.replace(
@@ -233,7 +235,7 @@ function extractMediaFromData(obj, depth = 0) {
     }
   }
 
-  // Handle quoted tweets - extract media from both the quote and the quoted tweet
+  // Handle quoted tweets
   if (obj.quoted_status_result?.result) {
     extractMediaFromData(obj.quoted_status_result.result, depth + 1);
   }
@@ -246,6 +248,65 @@ function extractMediaFromData(obj, depth = 0) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       extractMediaFromData(obj[key], depth + 1);
     }
+  }
+}
+
+// Extract tweet data (location, source) from ALL tweets, not just media tweets
+function extractTweetData(obj) {
+  if (!obj || typeof obj !== "object") return;
+
+  // Check if this is a tweet object
+  const tweetId = obj.rest_id || obj.id_str || obj.legacy?.id_str;
+  if (!tweetId) return;
+
+  // Skip if already cached
+  if (tweetDataCache.has(tweetId)) return;
+
+  let username = null;
+  let location = null;
+  let source = null;
+
+  // Extract user data from various API response structures
+  const userResult = obj.core?.user_results?.result;
+  if (userResult) {
+    const userLegacy = userResult.legacy;
+    if (userLegacy) {
+      username = userLegacy.screen_name;
+      location = userLegacy.location;
+      // Cache user data by username for later lookup
+      if (username && location) {
+        userDataCache.set(username.toLowerCase(), {
+          location,
+          name: userLegacy.name,
+        });
+      }
+    }
+  } else if (obj.user) {
+    username = obj.user.screen_name;
+    location = obj.user.location;
+    if (username && location) {
+      userDataCache.set(username.toLowerCase(), {
+        location,
+        name: obj.user.name,
+      });
+    }
+  }
+
+  // Extract source
+  const rawSource = obj.source || obj.legacy?.source;
+  if (rawSource) {
+    const sourceMatch = rawSource.match(/>([^<]+)</);
+    source = sourceMatch ? sourceMatch[1] : rawSource;
+  }
+
+  // Cache tweet data
+  if (username || source) {
+    tweetDataCache.set(tweetId, { username, source });
+  }
+
+  // Make sure location is in locationCache too
+  if (location && location.trim()) {
+    locationCache.set(tweetId, location);
   }
 }
 
@@ -519,9 +580,9 @@ function applyStyles() {
     css += `
       /* Hide "Discover more" section in timeline */
       [aria-label*="Discover more"],
-      [data-testid="cellInnerDiv"]:has([aria-label*="Discover more"]),
-      div:has(> div > h2:contains("Discover more")),
-      section[aria-labelledby*="accessible-list"]:has([aria-label*="Discover"]) {
+      [data-testid="cellInnerDiv"]:has([aria-label*="Discover"]),
+      [data-testid="cellInnerDiv"]:has(h2[role="heading"]),
+      div[data-testid="primaryColumn"] section:has([aria-label*="Discover"]) {
         display: none !important;
       }
     `;
@@ -531,9 +592,10 @@ function applyStyles() {
   if (config.hideTopLive) {
     css += `
       /* Hide "Top Live" section */
-      [data-testid="cellInnerDiv"]:has([aria-label*="Top Live"]),
       [aria-label*="Top Live"],
-      div:has(> div > h2:contains("Top Live")) {
+      [aria-label*="Live"][role="group"],
+      [data-testid="cellInnerDiv"]:has([aria-label*="Live"]),
+      [data-testid="cellInnerDiv"]:has(a[href*="/i/broadcasts"]) {
         display: none !important;
       }
     `;
@@ -542,45 +604,90 @@ function applyStyles() {
   // Hide Today's News
   if (config.hideTodaysNews) {
     css += `
-      /* Hide "Today's News" section */
-      [data-testid="cellInnerDiv"]:has([aria-label*="Today"]),
+      /* Hide "Today's News" / "What's happening" section */
       [aria-label*="Today's News"],
-      div:has(> div > h2:contains("Today")) {
+      [aria-label*="What's happening"],
+      [data-testid="cellInnerDiv"]:has([aria-label*="news" i]),
+      [data-testid="trend"],
+      section[aria-labelledby*="accessible-list"]:has([data-testid="trend"]) {
         display: none !important;
       }
     `;
   }
 
-  // Fix Video Scrollbar
+  // Fix Video Scrollbar - Target Twitter's custom video player
   if (config.fixVideoScrollbar) {
-    const scrollbarColor = config.videoScrollbarColor || '#ffffff';
-    // Convert hex to rgba
+    const scrollbarColor = config.videoScrollbarColor || "#ffffff";
     const r = parseInt(scrollbarColor.slice(1, 3), 16);
     const g = parseInt(scrollbarColor.slice(3, 5), 16);
     const b = parseInt(scrollbarColor.slice(5, 7), 16);
-    
+
     css += `
-      /* Custom colored scrollbar for videos */
-      video::-webkit-media-controls-timeline {
-        background-color: rgba(${r}, ${g}, ${b}, 0.3) !important;
+      /* Twitter's custom video player progress bar */
+      div[data-testid="videoPlayer"] div[role="progressbar"],
+      div[data-testid="videoPlayer"] input[type="range"],
+      div[data-testid="videoComponent"] input[type="range"],
+      [data-testid="videoPlayer"] [role="slider"],
+      div[aria-label*="video player"] input[type="range"] {
+        accent-color: ${scrollbarColor} !important;
       }
       
-      video::-webkit-media-controls-seek-back-button,
-      video::-webkit-media-controls-seek-forward-button,
-      video::-webkit-media-controls-play-button,
-      video::-webkit-media-controls-current-time-display,
-      video::-webkit-media-controls-time-remaining-display {
+      /* Video player progress track */
+      div[data-testid="videoPlayer"] input[type="range"]::-webkit-slider-track,
+      div[data-testid="videoComponent"] input[type="range"]::-webkit-slider-track {
+        background: rgba(${r}, ${g}, ${b}, 0.3) !important;
+        border: none !important;
+      }
+      
+      /* Video player progress thumb */
+      div[data-testid="videoPlayer"] input[type="range"]::-webkit-slider-thumb,
+      div[data-testid="videoComponent"] input[type="range"]::-webkit-slider-thumb {
+        background: ${scrollbarColor} !important;
+        border: 2px solid ${scrollbarColor} !important;
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.5) !important;
+      }
+      
+      /* Firefox support */
+      div[data-testid="videoPlayer"] input[type="range"]::-moz-range-track,
+      div[data-testid="videoComponent"] input[type="range"]::-moz-range-track {
+        background: rgba(${r}, ${g}, ${b}, 0.3) !important;
+      }
+      
+      div[data-testid="videoPlayer"] input[type="range"]::-moz-range-thumb,
+      div[data-testid="videoComponent"] input[type="range"]::-moz-range-thumb {
+        background: ${scrollbarColor} !important;
+        border: 2px solid ${scrollbarColor} !important;
+      }
+      
+      /* Video player progress fill/loaded */
+      div[data-testid="videoPlayer"] div[style*="background"],
+      div[data-testid="videoComponent"] div[style*="background"] {
+        filter: brightness(1.5) !important;
+      }
+      
+      /* Volume slider */
+      div[data-testid="videoPlayer"] input[aria-label*="olume"],
+      div[data-testid="videoComponent"] input[aria-label*="olume"] {
+        accent-color: ${scrollbarColor} !important;
+      }
+      
+      /* Time display */
+      div[data-testid="videoPlayer"] span,
+      div[data-testid="videoPlayer"] div[style*="color"] {
         color: ${scrollbarColor} !important;
-        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8) !important;
       }
       
-      video::-webkit-media-controls-volume-slider {
-        background-color: rgba(${r}, ${g}, ${b}, 0.3) !important;
+      /* Control buttons */
+      div[data-testid="videoPlayer"] svg,
+      div[data-testid="videoComponent"] svg {
+        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)) !important;
       }
       
-      /* Enhanced visibility */
-      video::-webkit-media-controls-enclosure {
-        background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.7) 100%) !important;
+      /* Enhanced control bar visibility */
+      div[data-testid="videoPlayer"] > div,
+      div[data-testid="videoComponent"] > div {
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 100%) !important;
       }
     `;
   }
@@ -702,11 +809,25 @@ function startObserver() {
 
         // Process videos for loop and autoplay
         if (config.enableVideoLoop || config.enableVideoAutoplay) {
-          const videos = node.tagName === "VIDEO" ? [node] : node.querySelectorAll("video");
+          const videos =
+            node.tagName === "VIDEO" ? [node] : node.querySelectorAll("video");
           for (const video of videos) {
             if (!processedElements.has(video)) {
               processedElements.add(video);
               enhanceVideo(video);
+            }
+          }
+        }
+
+        // Fix video player controls color
+        if (config.fixVideoScrollbar) {
+          const videoPlayers = node.querySelectorAll(
+            '[data-testid="videoPlayer"], [data-testid="videoComponent"]'
+          );
+          for (const player of videoPlayers) {
+            if (!processedElements.has(player)) {
+              processedElements.add(player);
+              fixVideoPlayerControls(player);
             }
           }
         }
@@ -806,7 +927,7 @@ function customizeBottomNavBar() {
           // Remove old listeners and add new one
           const newLink = link.cloneNode(true);
           link.parentNode.replaceChild(newLink, link);
-          
+
           newLink.addEventListener(
             "click",
             (e) => {
@@ -921,10 +1042,11 @@ function addDownloadButton(container) {
   // Twitter structure: div > div > div > button
   const outerWrapper = document.createElement("div");
   outerWrapper.style.cssText = "display: flex; flex: 1 1 0%;";
-  
+
   const innerWrapper = document.createElement("div");
-  innerWrapper.style.cssText = "display: flex; align-items: center; justify-content: flex-start;";
-  
+  innerWrapper.style.cssText =
+    "display: flex; align-items: center; justify-content: flex-start;";
+
   const buttonContainer = document.createElement("div");
   buttonContainer.style.cssText = "display: flex;";
 
@@ -955,23 +1077,23 @@ function injectShareMenuItem(menu) {
 
   // SIMPLE APPROACH: Find tweet ID from DOM when menu appears
   let tweetId = null;
-  
+
   // Try 1: URL (for focused tweets)
   const urlMatch = window.location.href.match(/status\/(\d+)/);
   if (urlMatch) {
     tweetId = urlMatch[1];
     console.log("   Method 1 (URL): Found tweet", tweetId);
   }
-  
+
   // Try 2: Last clicked (from tracking)
   if (!tweetId && lastClickedTweetId) {
     tweetId = lastClickedTweetId;
     console.log("   Method 2 (Tracking): Found tweet", tweetId);
   }
-  
+
   // Try 3: Find ANY visible tweet with media
   if (!tweetId) {
-    const allTweets = Array.from(document.querySelectorAll('article'));
+    const allTweets = Array.from(document.querySelectorAll("article"));
     for (const tweet of allTweets) {
       const link = tweet.querySelector('a[href*="/status/"]');
       if (link) {
@@ -996,7 +1118,8 @@ function injectShareMenuItem(menu) {
   item.className = "tweek-menu-item";
   item.setAttribute("role", "menuitem");
   item.setAttribute("tabindex", "0");
-  item.innerHTML = '<svg viewBox="0 0 24 24"><g><path d="M3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-8h-2v8H5v-8H3v8zM13 9v6h-2V9H8l4-5 4 5h-3z"/></g></svg><span>Download Media</span>';
+  item.innerHTML =
+    '<svg viewBox="0 0 24 24"><g><path d="M3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-8h-2v8H5v-8H3v8zM13 9v6h-2V9H8l4-5 4 5h-3z"/></g></svg><span>Download Media</span>';
 
   // Store tweet ID in the element
   if (tweetId) {
@@ -1008,7 +1131,7 @@ function injectShareMenuItem(menu) {
     e.stopPropagation();
 
     let finalTweetId = e.currentTarget.dataset.tweetId;
-    
+
     // Try to find tweet ID if not stored
     if (!finalTweetId) {
       const urlMatch2 = window.location.href.match(/status\/(\d+)/);
@@ -1020,13 +1143,21 @@ function injectShareMenuItem(menu) {
 
     // Close menu
     try {
-      document.dispatchEvent(new KeyboardEvent('keydown', { 
-        key: 'Escape', keyCode: 27, bubbles: true, cancelable: true 
-      }));
-      setTimeout(() => document.querySelector('[data-testid="app"]')?.click(), 50);
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          keyCode: 27,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      setTimeout(
+        () => document.querySelector('[data-testid="app"]')?.click(),
+        50
+      );
     } catch (err) {}
 
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Download
     if (finalTweetId && mediaCache.has(finalTweetId)) {
@@ -1094,22 +1225,30 @@ function downloadMedia(tweetId, btn) {
   const article = document
     .querySelector(`a[href*="/status/${tweetId}"]`)
     ?.closest("article");
-  
+
   let allMedia = [...data.media];
   let quotedTweetData = null;
-  
+
   if (article) {
     // Look for quoted tweet within this article
-    const quotedTweetLink = article.querySelector('[role="link"] a[href*="/status/"]:not([href*="/' + tweetId + '"])');
+    const quotedTweetLink = article.querySelector(
+      '[role="link"] a[href*="/status/"]:not([href*="/' + tweetId + '"])'
+    );
     if (quotedTweetLink) {
       const quotedMatch = quotedTweetLink.href.match(/status\/(\d+)/);
       if (quotedMatch) {
         const quotedTweetId = quotedMatch[1];
         quotedTweetData = mediaCache.get(quotedTweetId);
-        
+
         // Add quoted tweet media to the collection
-        if (quotedTweetData && quotedTweetData.media && quotedTweetData.media.length > 0) {
-          console.log(`📎 Found quoted tweet ${quotedTweetId}, downloading both tweets' media`);
+        if (
+          quotedTweetData &&
+          quotedTweetData.media &&
+          quotedTweetData.media.length > 0
+        ) {
+          console.log(
+            `📎 Found quoted tweet ${quotedTweetId}, downloading both tweets' media`
+          );
           allMedia = [...allMedia, ...quotedTweetData.media];
         }
       }
@@ -1150,6 +1289,60 @@ function triggerDownload(url, filename) {
 }
 
 // ==========================================
+// VIDEO PLAYER CONTROLS COLOR FIX
+// ==========================================
+function fixVideoPlayerControls(playerElement) {
+  const color = config.videoScrollbarColor || "#ffffff";
+
+  // Find all range inputs (progress bars, volume sliders)
+  const rangeInputs = playerElement.querySelectorAll('input[type="range"]');
+  rangeInputs.forEach((input) => {
+    input.style.accentColor = color;
+
+    // Add custom styling
+    const style = document.createElement("style");
+    style.textContent = `
+      input[type="range"]::-webkit-slider-track {
+        background: rgba(255, 255, 255, 0.3) !important;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        background: ${color} !important;
+        border: 2px solid ${color} !important;
+      }
+    `;
+    if (!document.getElementById("tweek-video-range-style")) {
+      style.id = "tweek-video-range-style";
+      document.head.appendChild(style);
+    }
+  });
+
+  // Find progress bar divs and force color
+  const progressBars = playerElement.querySelectorAll(
+    '[role="progressbar"], [role="slider"]'
+  );
+  progressBars.forEach((bar) => {
+    const observer = new MutationObserver(() => {
+      const fills = bar.querySelectorAll('div[style*="background"]');
+      fills.forEach((fill) => {
+        if (fill.style.background && fill.style.background.includes("rgb")) {
+          fill.style.background = color;
+        }
+      });
+    });
+    observer.observe(bar, { attributes: true, childList: true, subtree: true });
+  });
+
+  // Force text color for time displays
+  const timeDisplays = playerElement.querySelectorAll("span, div");
+  timeDisplays.forEach((el) => {
+    if (el.textContent.match(/\d+:\d+/)) {
+      el.style.color = color;
+      el.style.textShadow = "1px 1px 2px rgba(0, 0, 0, 0.8)";
+    }
+  });
+}
+
+// ==========================================
 // VIDEO ENHANCEMENTS
 // ==========================================
 const processedVideos = new WeakMap();
@@ -1158,51 +1351,20 @@ function enhanceVideo(video) {
   // Prevent duplicate processing
   if (processedVideos.has(video)) return;
   processedVideos.set(video, true);
-  
+
   // Enable loop playback
   if (config.enableVideoLoop) {
     video.loop = true;
-    video.setAttribute('loop', '');
+    video.setAttribute("loop", "");
   }
 
-  // Enable autoplay (with observer for when video enters viewport)
+  // DISABLED BY DEFAULT - Only enable if user explicitly wants it
+  // The autoplay feature was causing videos to pause unexpectedly
   if (config.enableVideoAutoplay) {
-    // Don't auto-mute if user hasn't muted
-    const wasMuted = video.muted;
-    
-    // Use Intersection Observer to autoplay when video is in viewport
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
-          // Video is mostly in view - try to play
-          if (video.paused) {
-            const playPromise = video.play();
-            if (playPromise !== undefined) {
-              playPromise.catch(error => {
-                // Autoplay was prevented - mute and try again
-                if (!wasMuted && error.name === 'NotAllowedError') {
-                  video.muted = true;
-                  video.play().catch(e => console.log("Autoplay still prevented:", e));
-                }
-              });
-            }
-          }
-        } else if (entry.intersectionRatio < 0.25) {
-          // Video is mostly out of view - pause it
-          if (!video.paused && video.currentTime > 0) {
-            video.pause();
-          }
-        }
-      });
-    }, { 
-      threshold: [0, 0.25, 0.5, 0.75, 1.0],
-      rootMargin: '50px'
-    });
-    
-    observer.observe(video);
-    
-    // Store observer for cleanup
-    processedVideos.set(video, { observer, wasMuted });
+    // Simple autoplay - let Twitter handle the logic
+    // Don't interfere with Twitter's native video behavior
+    video.setAttribute("autoplay", "");
+    video.setAttribute("playsinline", "");
   }
 }
 
@@ -1227,34 +1389,35 @@ function enhanceFocusedTweet() {
   // 1. Restore Tweet Source
   if (config.restoreTweetSource && !focusedTweet.dataset.tweekSource) {
     focusedTweet.dataset.tweekSource = "true";
-    
+
     // Find the tweet metadata area (where timestamp is)
-    const timeElement = focusedTweet.querySelector('time');
+    const timeElement = focusedTweet.querySelector("time");
     if (timeElement) {
-      const timeLink = timeElement.closest('a');
+      const timeLink = timeElement.closest("a");
       if (timeLink && timeLink.parentElement) {
         const metadataContainer = timeLink.parentElement;
-        
+
         // Try to get source from API data first
         const data = mediaCache.get(tweetId);
         let sourceText = null;
-        
+
         if (data && data.source) {
           sourceText = data.source;
         }
-        
+
         // Create source element
-        if (sourceText || true) { // Always create, will populate from DOM or "Twitter"
+        if (sourceText || true) {
+          // Always create, will populate from DOM or "Twitter"
           const separator = document.createElement("span");
           separator.setAttribute("aria-hidden", "true");
           separator.textContent = " · ";
           separator.style.color = "rgb(113, 118, 123)";
           separator.style.margin = "0 4px";
-          
+
           const sourceSpan = document.createElement("span");
           sourceSpan.style.color = "rgb(113, 118, 123)";
           sourceSpan.textContent = sourceText || "Twitter Web App";
-          
+
           metadataContainer.appendChild(separator);
           metadataContainer.appendChild(sourceSpan);
         }
@@ -1264,18 +1427,52 @@ function enhanceFocusedTweet() {
 
   // 2. Show Account Location
   if (config.showAccountLocation && !focusedTweet.dataset.tweekLocation) {
-    const location = locationCache.get(tweetId);
+    // Try to get location from cache by tweet ID first
+    let location = locationCache.get(tweetId);
+
+    // If not found, try to get username from tweetDataCache and look up from userDataCache
+    if (!location) {
+      const tweetData = tweetDataCache.get(tweetId);
+      if (tweetData && tweetData.username) {
+        const userData = userDataCache.get(tweetData.username.toLowerCase());
+        if (userData && userData.location) {
+          location = userData.location;
+        }
+      }
+    }
+
+    // If still not found, try extracting username from DOM
+    if (!location) {
+      const userLinks = focusedTweet.querySelectorAll('a[role="link"]');
+      for (const link of userLinks) {
+        const href = link.getAttribute("href");
+        if (
+          href &&
+          href.startsWith("/") &&
+          !href.includes("/status/") &&
+          href.split("/").length === 2
+        ) {
+          const username = href.slice(1).toLowerCase();
+          const userData = userDataCache.get(username);
+          if (userData && userData.location) {
+            location = userData.location;
+            break;
+          }
+        }
+      }
+    }
+
     if (location && location.trim()) {
       focusedTweet.dataset.tweekLocation = "true";
-      
+
       // Find the metadata container - try multiple approaches
-      const timeElement = focusedTweet.querySelector('time');
+      const timeElement = focusedTweet.querySelector("time");
       if (timeElement) {
-        const timeLink = timeElement.closest('a');
+        const timeLink = timeElement.closest("a");
         if (timeLink) {
           // Get the parent that contains the timestamp and other metadata
           const timestampContainer = timeLink.parentElement;
-          
+
           if (timestampContainer) {
             // Create location element to add after timestamp
             const separator = document.createElement("span");
@@ -1283,12 +1480,12 @@ function enhanceFocusedTweet() {
             separator.style.color = "rgb(113, 118, 123)";
             separator.style.margin = "0 4px";
             separator.textContent = " · ";
-            
+
             const locSpan = document.createElement("span");
             locSpan.style.color = "rgb(113, 118, 123)";
             locSpan.style.fontSize = "15px";
             locSpan.textContent = location;
-            
+
             // Append location right after the timestamp in the same container
             timestampContainer.appendChild(separator);
             timestampContainer.appendChild(locSpan);
@@ -1309,7 +1506,7 @@ function init() {
   applyStyles();
   startInterceptor();
   startObserver();
-  
+
   // Setup global share button click tracking AFTER DOM is ready
   setupShareTracking();
 
@@ -1321,87 +1518,99 @@ function init() {
 
 // Track share button clicks to identify which tweet's share was clicked
 function setupShareTracking() {
-  document.addEventListener('click', (e) => {
-    const target = e.target;
-    
-    // Check if click is on share button or its children (including SVG paths)
-    const shareBtn = target.closest('[data-testid="share"]') || 
-                     target.closest('[aria-label*="Share"]') ||
-                     target.closest('button[aria-label*="hare"]');
-    
-    if (shareBtn) {
-      console.log("🔍 Share button clicked, searching for tweet...");
-      
-      // Try multiple methods to find the article
-      let article = shareBtn.closest('article[data-testid="tweet"]');
-      
-      if (!article) {
-        // Try finding article by role
-        article = shareBtn.closest('article[role="article"]');
-      }
-      
-      if (!article) {
-        // Look for any article parent
-        article = shareBtn.closest('article');
-      }
-      
-      if (!article) {
-        console.warn("⚠️ Share button clicked but no article found");
-        console.log("   Share button element:", shareBtn);
-        console.log("   Parent elements:", shareBtn.parentElement, shareBtn.parentElement?.parentElement);
-        
-        // Last resort: Find the nearest tweet by scanning up the DOM
-        let parent = shareBtn.parentElement;
-        let attempts = 0;
-        while (parent && attempts < 20) {
-          const statusLink = parent.querySelector('a[href*="/status/"]');
-          if (statusLink) {
-            const match = statusLink.href.match(/status\/(\d+)/);
-            if (match) {
-              lastClickedTweetId = match[1];
-              console.log("📌 Found tweet ID by scanning DOM:", lastClickedTweetId);
-              return;
+  document.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target;
+
+      // Check if click is on share button or its children (including SVG paths)
+      const shareBtn =
+        target.closest('[data-testid="share"]') ||
+        target.closest('[aria-label*="Share"]') ||
+        target.closest('button[aria-label*="hare"]');
+
+      if (shareBtn) {
+        console.log("🔍 Share button clicked, searching for tweet...");
+
+        // Try multiple methods to find the article
+        let article = shareBtn.closest('article[data-testid="tweet"]');
+
+        if (!article) {
+          // Try finding article by role
+          article = shareBtn.closest('article[role="article"]');
+        }
+
+        if (!article) {
+          // Look for any article parent
+          article = shareBtn.closest("article");
+        }
+
+        if (!article) {
+          console.warn("⚠️ Share button clicked but no article found");
+          console.log("   Share button element:", shareBtn);
+          console.log(
+            "   Parent elements:",
+            shareBtn.parentElement,
+            shareBtn.parentElement?.parentElement
+          );
+
+          // Last resort: Find the nearest tweet by scanning up the DOM
+          let parent = shareBtn.parentElement;
+          let attempts = 0;
+          while (parent && attempts < 20) {
+            const statusLink = parent.querySelector('a[href*="/status/"]');
+            if (statusLink) {
+              const match = statusLink.href.match(/status\/(\d+)/);
+              if (match) {
+                lastClickedTweetId = match[1];
+                console.log(
+                  "📌 Found tweet ID by scanning DOM:",
+                  lastClickedTweetId
+                );
+                return;
+              }
             }
+            parent = parent.parentElement;
+            attempts++;
           }
-          parent = parent.parentElement;
-          attempts++;
+
+          return;
         }
-        
-        return;
-      }
-      
-      console.log("✅ Found article element");
-      
-      // Get ALL status links in this specific article
-      const links = article.querySelectorAll('a[href*="/status/"]');
-      console.log("   Found", links.length, "status links in article");
-      
-      // Method 1: Find the time element's parent link (most reliable for main tweet)
-      let mainLink = null;
-      const timeElement = article.querySelector('time');
-      if (timeElement) {
-        mainLink = timeElement.closest('a[href*="/status/"]');
-        console.log("   Found link via time element:", mainLink?.href);
-      }
-      
-      // Method 2: If no time element, get the last status link
-      if (!mainLink && links.length > 0) {
-        mainLink = links[links.length - 1];
-        console.log("   Using last status link:", mainLink?.href);
-      }
-      
-      if (mainLink) {
-        const match = mainLink.href.match(/status\/(\d+)/);
-        if (match) {
-          lastClickedTweetId = match[1];
-          console.log("📌 Share clicked on tweet ID:", lastClickedTweetId);
+
+        console.log("✅ Found article element");
+
+        // Get ALL status links in this specific article
+        const links = article.querySelectorAll('a[href*="/status/"]');
+        console.log("   Found", links.length, "status links in article");
+
+        // Method 1: Find the time element's parent link (most reliable for main tweet)
+        let mainLink = null;
+        const timeElement = article.querySelector("time");
+        if (timeElement) {
+          mainLink = timeElement.closest('a[href*="/status/"]');
+          console.log("   Found link via time element:", mainLink?.href);
         }
-      } else {
-        console.warn("⚠️ Could not find tweet ID in article");
+
+        // Method 2: If no time element, get the last status link
+        if (!mainLink && links.length > 0) {
+          mainLink = links[links.length - 1];
+          console.log("   Using last status link:", mainLink?.href);
+        }
+
+        if (mainLink) {
+          const match = mainLink.href.match(/status\/(\d+)/);
+          if (match) {
+            lastClickedTweetId = match[1];
+            console.log("📌 Share clicked on tweet ID:", lastClickedTweetId);
+          }
+        } else {
+          console.warn("⚠️ Could not find tweet ID in article");
+        }
       }
-    }
-  }, true); // Use capture phase to ensure we catch it first
-  
+    },
+    true
+  ); // Use capture phase to ensure we catch it first
+
   console.log("👂 Share button tracking enabled");
 }
 
