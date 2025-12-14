@@ -615,83 +615,6 @@ function applyStyles() {
     `;
   }
 
-  // Fix Video Scrollbar - Target Twitter's custom video player
-  if (config.fixVideoScrollbar) {
-    const scrollbarColor = config.videoScrollbarColor || "#ffffff";
-    const r = parseInt(scrollbarColor.slice(1, 3), 16);
-    const g = parseInt(scrollbarColor.slice(3, 5), 16);
-    const b = parseInt(scrollbarColor.slice(5, 7), 16);
-
-    css += `
-      /* Twitter's custom video player progress bar */
-      div[data-testid="videoPlayer"] div[role="progressbar"],
-      div[data-testid="videoPlayer"] input[type="range"],
-      div[data-testid="videoComponent"] input[type="range"],
-      [data-testid="videoPlayer"] [role="slider"],
-      div[aria-label*="video player"] input[type="range"] {
-        accent-color: ${scrollbarColor} !important;
-      }
-      
-      /* Video player progress track */
-      div[data-testid="videoPlayer"] input[type="range"]::-webkit-slider-track,
-      div[data-testid="videoComponent"] input[type="range"]::-webkit-slider-track {
-        background: rgba(${r}, ${g}, ${b}, 0.3) !important;
-        border: none !important;
-      }
-      
-      /* Video player progress thumb */
-      div[data-testid="videoPlayer"] input[type="range"]::-webkit-slider-thumb,
-      div[data-testid="videoComponent"] input[type="range"]::-webkit-slider-thumb {
-        background: ${scrollbarColor} !important;
-        border: 2px solid ${scrollbarColor} !important;
-        box-shadow: 0 0 5px rgba(0, 0, 0, 0.5) !important;
-      }
-      
-      /* Firefox support */
-      div[data-testid="videoPlayer"] input[type="range"]::-moz-range-track,
-      div[data-testid="videoComponent"] input[type="range"]::-moz-range-track {
-        background: rgba(${r}, ${g}, ${b}, 0.3) !important;
-      }
-      
-      div[data-testid="videoPlayer"] input[type="range"]::-moz-range-thumb,
-      div[data-testid="videoComponent"] input[type="range"]::-moz-range-thumb {
-        background: ${scrollbarColor} !important;
-        border: 2px solid ${scrollbarColor} !important;
-      }
-      
-      /* Video player progress fill/loaded */
-      div[data-testid="videoPlayer"] div[style*="background"],
-      div[data-testid="videoComponent"] div[style*="background"] {
-        filter: brightness(1.5) !important;
-      }
-      
-      /* Volume slider */
-      div[data-testid="videoPlayer"] input[aria-label*="olume"],
-      div[data-testid="videoComponent"] input[aria-label*="olume"] {
-        accent-color: ${scrollbarColor} !important;
-      }
-      
-      /* Time display */
-      div[data-testid="videoPlayer"] span,
-      div[data-testid="videoPlayer"] div[style*="color"] {
-        color: ${scrollbarColor} !important;
-        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8) !important;
-      }
-      
-      /* Control buttons */
-      div[data-testid="videoPlayer"] svg,
-      div[data-testid="videoComponent"] svg {
-        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)) !important;
-      }
-      
-      /* Enhanced control bar visibility */
-      div[data-testid="videoPlayer"] > div,
-      div[data-testid="videoComponent"] > div {
-        background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 100%) !important;
-      }
-    `;
-  }
-
   // Hide Bookmarks Button (in action bar)
   if (config.hideBookmarksButton) {
     css += `
@@ -802,7 +725,7 @@ function startObserver() {
           }
         }
 
-        // Restore tweet source and location
+        // Show tweet source and/or account location on focused tweets
         if (config.restoreTweetSource || config.showAccountLocation) {
           enhanceFocusedTweet();
         }
@@ -815,19 +738,6 @@ function startObserver() {
             if (!processedElements.has(video)) {
               processedElements.add(video);
               enhanceVideo(video);
-            }
-          }
-        }
-
-        // Fix video player controls color
-        if (config.fixVideoScrollbar) {
-          const videoPlayers = node.querySelectorAll(
-            '[data-testid="videoPlayer"], [data-testid="videoComponent"]'
-          );
-          for (const player of videoPlayers) {
-            if (!processedElements.has(player)) {
-              processedElements.add(player);
-              fixVideoPlayerControls(player);
             }
           }
         }
@@ -1289,63 +1199,58 @@ function triggerDownload(url, filename) {
 }
 
 // ==========================================
-// VIDEO PLAYER CONTROLS COLOR FIX
-// ==========================================
-function fixVideoPlayerControls(playerElement) {
-  const color = config.videoScrollbarColor || "#ffffff";
-
-  // Find all range inputs (progress bars, volume sliders)
-  const rangeInputs = playerElement.querySelectorAll('input[type="range"]');
-  rangeInputs.forEach((input) => {
-    input.style.accentColor = color;
-
-    // Add custom styling
-    const style = document.createElement("style");
-    style.textContent = `
-      input[type="range"]::-webkit-slider-track {
-        background: rgba(255, 255, 255, 0.3) !important;
-      }
-      input[type="range"]::-webkit-slider-thumb {
-        background: ${color} !important;
-        border: 2px solid ${color} !important;
-      }
-    `;
-    if (!document.getElementById("tweek-video-range-style")) {
-      style.id = "tweek-video-range-style";
-      document.head.appendChild(style);
-    }
-  });
-
-  // Find progress bar divs and force color
-  const progressBars = playerElement.querySelectorAll(
-    '[role="progressbar"], [role="slider"]'
-  );
-  progressBars.forEach((bar) => {
-    const observer = new MutationObserver(() => {
-      const fills = bar.querySelectorAll('div[style*="background"]');
-      fills.forEach((fill) => {
-        if (fill.style.background && fill.style.background.includes("rgb")) {
-          fill.style.background = color;
-        }
-      });
-    });
-    observer.observe(bar, { attributes: true, childList: true, subtree: true });
-  });
-
-  // Force text color for time displays
-  const timeDisplays = playerElement.querySelectorAll("span, div");
-  timeDisplays.forEach((el) => {
-    if (el.textContent.match(/\d+:\d+/)) {
-      el.style.color = color;
-      el.style.textShadow = "1px 1px 2px rgba(0, 0, 0, 0.8)";
-    }
-  });
-}
-
-// ==========================================
 // VIDEO ENHANCEMENTS
 // ==========================================
 const processedVideos = new WeakMap();
+let currentlyPlayingVideo = null; // Track which video is currently playing
+let videoObserver = null; // IntersectionObserver for viewport detection
+
+// Initialize video observer for autoplay functionality
+function initVideoObserver() {
+  if (videoObserver || !config.enableVideoAutoplay) return;
+
+  videoObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const video = entry.target;
+
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+          // Video is at least 50% visible - play it
+          // But first, pause any other playing video
+          if (currentlyPlayingVideo && currentlyPlayingVideo !== video) {
+            try {
+              currentlyPlayingVideo.pause();
+            } catch (e) {}
+          }
+
+          // Play this video
+          try {
+            const playPromise = video.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(() => {
+                // Autoplay was prevented, likely by browser policy
+                // User interaction required - this is expected behavior
+              });
+            }
+            currentlyPlayingVideo = video;
+          } catch (e) {}
+        } else {
+          // Video is not visible enough - pause it
+          if (video === currentlyPlayingVideo) {
+            try {
+              video.pause();
+            } catch (e) {}
+            currentlyPlayingVideo = null;
+          }
+        }
+      }
+    },
+    {
+      threshold: [0, 0.25, 0.5, 0.75, 1.0], // Multiple thresholds for better detection
+      rootMargin: "-10% 0px -10% 0px", // Slight margin to prevent edge cases
+    }
+  );
+}
 
 function enhanceVideo(video) {
   // Prevent duplicate processing
@@ -1358,13 +1263,53 @@ function enhanceVideo(video) {
     video.setAttribute("loop", "");
   }
 
-  // DISABLED BY DEFAULT - Only enable if user explicitly wants it
-  // The autoplay feature was causing videos to pause unexpectedly
+  // Autoplay with proper viewport detection
   if (config.enableVideoAutoplay) {
-    // Simple autoplay - let Twitter handle the logic
-    // Don't interfere with Twitter's native video behavior
-    video.setAttribute("autoplay", "");
+    // Initialize observer if not already done
+    initVideoObserver();
+
+    // Set attributes for better autoplay support
     video.setAttribute("playsinline", "");
+    video.muted = true; // Muted is often required for autoplay to work
+    video.setAttribute("muted", "");
+
+    // Observe this video for visibility changes
+    if (videoObserver) {
+      videoObserver.observe(video);
+    }
+
+    // Clean up observer when video is removed from DOM
+    const cleanup = () => {
+      if (videoObserver) {
+        videoObserver.unobserve(video);
+      }
+      if (currentlyPlayingVideo === video) {
+        currentlyPlayingVideo = null;
+      }
+    };
+
+    // Use MutationObserver to detect when video is removed
+    const parentObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const removed of mutation.removedNodes) {
+          if (
+            removed === video ||
+            (removed.contains && removed.contains(video))
+          ) {
+            cleanup();
+            parentObserver.disconnect();
+            return;
+          }
+        }
+      }
+    });
+
+    if (video.parentElement) {
+      parentObserver.observe(video.parentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
   }
 }
 
@@ -1386,42 +1331,44 @@ function enhanceFocusedTweet() {
   if (!match) return;
   const tweetId = match[1];
 
-  // 1. Restore Tweet Source
+  // Find the metadata container for adding source and location
+  const timeElement = focusedTweet.querySelector("time");
+  if (!timeElement) return;
+  const timeLink = timeElement.closest("a");
+  if (!timeLink) return;
+  const metadataContainer = timeLink.parentElement;
+  if (!metadataContainer) return;
+
+  // 1. Restore Tweet Source (only if we have real data from API)
   if (config.restoreTweetSource && !focusedTweet.dataset.tweekSource) {
-    focusedTweet.dataset.tweekSource = "true";
+    // Get source from tweetDataCache (populated from API responses)
+    const tweetData = tweetDataCache.get(tweetId);
+    const sourceText = tweetData?.source;
 
-    // Find the tweet metadata area (where timestamp is)
-    const timeElement = focusedTweet.querySelector("time");
-    if (timeElement) {
-      const timeLink = timeElement.closest("a");
-      if (timeLink && timeLink.parentElement) {
-        const metadataContainer = timeLink.parentElement;
+    // Also check mediaCache for source (fallback)
+    let source = sourceText;
+    if (!source) {
+      const mediaData = mediaCache.get(tweetId);
+      source = mediaData?.source;
+    }
 
-        // Try to get source from API data first
-        const data = mediaCache.get(tweetId);
-        let sourceText = null;
+    // Only display if we have REAL source data - never fake it
+    if (source && source.trim()) {
+      focusedTweet.dataset.tweekSource = "true";
 
-        if (data && data.source) {
-          sourceText = data.source;
-        }
+      const separator = document.createElement("span");
+      separator.setAttribute("aria-hidden", "true");
+      separator.style.color = "rgb(113, 118, 123)";
+      separator.style.margin = "0 4px";
+      separator.textContent = " · ";
 
-        // Create source element
-        if (sourceText || true) {
-          // Always create, will populate from DOM or "Twitter"
-          const separator = document.createElement("span");
-          separator.setAttribute("aria-hidden", "true");
-          separator.textContent = " · ";
-          separator.style.color = "rgb(113, 118, 123)";
-          separator.style.margin = "0 4px";
+      const sourceSpan = document.createElement("span");
+      sourceSpan.style.color = "rgb(113, 118, 123)";
+      sourceSpan.style.fontSize = "15px";
+      sourceSpan.textContent = source;
 
-          const sourceSpan = document.createElement("span");
-          sourceSpan.style.color = "rgb(113, 118, 123)";
-          sourceSpan.textContent = sourceText || "Twitter Web App";
-
-          metadataContainer.appendChild(separator);
-          metadataContainer.appendChild(sourceSpan);
-        }
-      }
+      metadataContainer.appendChild(separator);
+      metadataContainer.appendChild(sourceSpan);
     }
   }
 
@@ -1465,33 +1412,20 @@ function enhanceFocusedTweet() {
     if (location && location.trim()) {
       focusedTweet.dataset.tweekLocation = "true";
 
-      // Find the metadata container - try multiple approaches
-      const timeElement = focusedTweet.querySelector("time");
-      if (timeElement) {
-        const timeLink = timeElement.closest("a");
-        if (timeLink) {
-          // Get the parent that contains the timestamp and other metadata
-          const timestampContainer = timeLink.parentElement;
+      // Create location element
+      const separator = document.createElement("span");
+      separator.setAttribute("aria-hidden", "true");
+      separator.style.color = "rgb(113, 118, 123)";
+      separator.style.margin = "0 4px";
+      separator.textContent = " · ";
 
-          if (timestampContainer) {
-            // Create location element to add after timestamp
-            const separator = document.createElement("span");
-            separator.setAttribute("aria-hidden", "true");
-            separator.style.color = "rgb(113, 118, 123)";
-            separator.style.margin = "0 4px";
-            separator.textContent = " · ";
+      const locSpan = document.createElement("span");
+      locSpan.style.color = "rgb(113, 118, 123)";
+      locSpan.style.fontSize = "15px";
+      locSpan.textContent = location;
 
-            const locSpan = document.createElement("span");
-            locSpan.style.color = "rgb(113, 118, 123)";
-            locSpan.style.fontSize = "15px";
-            locSpan.textContent = location;
-
-            // Append location right after the timestamp in the same container
-            timestampContainer.appendChild(separator);
-            timestampContainer.appendChild(locSpan);
-          }
-        }
-      }
+      metadataContainer.appendChild(separator);
+      metadataContainer.appendChild(locSpan);
     }
   }
 }

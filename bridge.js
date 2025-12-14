@@ -24,8 +24,6 @@ const DEFAULT_SETTINGS = {
   enableVideoAutoplay: false,
   hideTopLive: false,
   hideTodaysNews: false,
-  fixVideoScrollbar: true,
-  videoScrollbarColor: '#ffffff',
   hideBookmarksButton: false,
 };
 
@@ -52,7 +50,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 window.addEventListener("TWEEK_DOWNLOAD", async (e) => {
   const { id, user, media } = e.detail;
 
-  console.log("🌉 Bridge: Download event received", { id, user, mediaCount: media?.length });
+  console.log("🌉 Bridge: Download event received", {
+    id,
+    user,
+    mediaCount: media?.length,
+  });
 
   if (!media || media.length === 0) {
     console.warn("🌉 Bridge: No media to download");
@@ -67,7 +69,10 @@ window.addEventListener("TWEEK_DOWNLOAD", async (e) => {
     });
     console.log("🌉 Bridge: Background response:", response);
   } catch (error) {
-    console.error("🌉 Bridge: Failed to send to background, using fallback", error);
+    console.error(
+      "🌉 Bridge: Failed to send to background, using fallback",
+      error
+    );
     // Fallback: open URLs
     for (const item of media) {
       window.open(item.url, "_blank");

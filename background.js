@@ -68,7 +68,33 @@ async function handleDownload({ user, id, media }) {
       });
       console.log(`✅ Downloaded: ${filename}`);
     } catch (error) {
-      console.error(`❌ Failed to download: ${url}`, error);
+      console.error(
+        `❌ Chrome downloads failed, trying blob fallback: ${url}`,
+        error
+      );
+
+      // Fallback: Fetch as blob and download
+      try {
+        const response = await fetch(url, { mode: "cors" });
+        if (response.ok) {
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+
+          await chrome.downloads.download({
+            url: blobUrl,
+            filename: filename,
+            conflictAction: "uniquify",
+          });
+
+          // Clean up blob URL after a delay
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          console.log(`✅ Downloaded (blob fallback): ${filename}`);
+        } else {
+          console.error(`❌ Failed to fetch media: ${response.status}`);
+        }
+      } catch (blobError) {
+        console.error(`❌ Blob fallback also failed: ${url}`, blobError);
+      }
     }
   }
 }

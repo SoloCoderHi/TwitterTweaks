@@ -22,8 +22,6 @@ const defaults = {
   enableVideoAutoplay: false,
   hideTopLive: false,
   hideTodaysNews: false,
-  fixVideoScrollbar: true,
-  videoScrollbarColor: "#ffffff",
   hideBookmarksButton: false,
 };
 
