@@ -22,7 +22,8 @@ const defaults = {
   enableVideoAutoplay: false,
   hideTopLive: false,
   hideTodaysNews: false,
-  hideBookmarksButton: false,
+  showBookmarkButton: true,
+  hideWhoToFollowSidebar: false,
 };
 
 // Display version

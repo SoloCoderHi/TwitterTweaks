@@ -13,7 +13,6 @@
  * - Blue bird logo restoration
  * - Video loop & autoplay options
  * - Hide Discover More, Top Live, Today's News
- * - Fixed video scrollbar visibility
  *
  * CSP-Safe: No inline event handlers
  */
@@ -43,9 +42,8 @@ let config = {
   enableVideoAutoplay: false,
   hideTopLive: false,
   hideTodaysNews: false,
-  fixVideoScrollbar: true,
-  videoScrollbarColor: "#ffffff",
-  hideBookmarksButton: false,
+  showBookmarkButton: true,
+  hideWhoToFollowSidebar: false,
 };
 
 let styleElement = null;
@@ -588,14 +586,22 @@ function applyStyles() {
     `;
   }
 
-  // Hide Top Live
+  // Hide Top Live / Spaces / "Available for shows"
   if (config.hideTopLive) {
     css += `
-      /* Hide "Top Live" section */
+      /* Hide "Top Live", Spaces, and streaming sections */
       [aria-label*="Top Live"],
       [aria-label*="Live"][role="group"],
       [data-testid="cellInnerDiv"]:has([aria-label*="Live"]),
-      [data-testid="cellInnerDiv"]:has(a[href*="/i/broadcasts"]) {
+      [data-testid="cellInnerDiv"]:has(a[href*="/i/broadcasts"]),
+      [data-testid="cellInnerDiv"]:has(a[href*="/i/spaces"]),
+      /* Hide "Available for shows" / Spaces bar */
+      [data-testid="placementTracking"]:has([href*="/i/spaces"]),
+      [data-testid="cellInnerDiv"]:has([data-testid="AudioSpaceCard"]),
+      div[data-testid="cellInnerDiv"]:has([href*="spaces"]),
+      /* Hide purple Spaces/Live bars */
+      article:has([href*="/i/spaces"]):not(:has([data-testid="tweetText"])),
+      [role="article"]:has(a[href*="/i/spaces"]):not(:has([data-testid="tweetPhoto"])):not(:has([data-testid="tweetText"])) {
         display: none !important;
       }
     `;
@@ -615,14 +621,27 @@ function applyStyles() {
     `;
   }
 
-  // Hide Bookmarks Button (in action bar)
-  if (config.hideBookmarksButton) {
+  // Hide Bookmarks Button (in action bar) - hide when showBookmarkButton is OFF
+  if (!config.showBookmarkButton) {
     css += `
       /* Hide bookmark button in tweet action bar */
       [data-testid="bookmark"],
       [data-testid="removeBookmark"],
       article [role="group"] > div:has([data-testid="bookmark"]),
       article [role="group"] > div:has([data-testid="removeBookmark"]) {
+        display: none !important;
+      }
+    `;
+  }
+
+  // Hide "Who to Follow" Sidebar
+  if (config.hideWhoToFollowSidebar) {
+    css += `
+      /* Hide "Who to Follow" section in sidebar */
+      [data-testid="sidebarColumn"] [aria-label*="follow" i],
+      [data-testid="sidebarColumn"] aside:has([data-testid="UserCell"]),
+      [data-testid="sidebarColumn"] section:has([data-testid="UserCell"]),
+      [data-testid="sidebarColumn"] [role="complementary"] > div:has([data-testid="UserCell"]) {
         display: none !important;
       }
     `;
@@ -1339,40 +1358,42 @@ function enhanceFocusedTweet() {
   const metadataContainer = timeLink.parentElement;
   if (!metadataContainer) return;
 
-  // 1. Restore Tweet Source (only if we have real data from API)
-  if (config.restoreTweetSource && !focusedTweet.dataset.tweekSource) {
-    // Get source from tweetDataCache (populated from API responses)
-    const tweetData = tweetDataCache.get(tweetId);
-    const sourceText = tweetData?.source;
+  // Helper to create separator and text span
+  function createMetadataItem(text, className) {
+    const fragment = document.createDocumentFragment();
 
-    // Also check mediaCache for source (fallback)
-    let source = sourceText;
-    if (!source) {
-      const mediaData = mediaCache.get(tweetId);
-      source = mediaData?.source;
-    }
+    const separator = document.createElement("span");
+    separator.setAttribute("aria-hidden", "true");
+    separator.className = "tweek-separator";
+    separator.style.color = "rgb(113, 118, 123)";
+    separator.style.margin = "0 4px";
+    separator.textContent = " · ";
 
-    // Only display if we have REAL source data - never fake it
-    if (source && source.trim()) {
-      focusedTweet.dataset.tweekSource = "true";
+    const textSpan = document.createElement("span");
+    textSpan.className = className;
+    textSpan.style.color = "rgb(113, 118, 123)";
+    textSpan.style.fontSize = "15px";
+    textSpan.textContent = text;
 
-      const separator = document.createElement("span");
-      separator.setAttribute("aria-hidden", "true");
-      separator.style.color = "rgb(113, 118, 123)";
-      separator.style.margin = "0 4px";
-      separator.textContent = " · ";
-
-      const sourceSpan = document.createElement("span");
-      sourceSpan.style.color = "rgb(113, 118, 123)";
-      sourceSpan.style.fontSize = "15px";
-      sourceSpan.textContent = source;
-
-      metadataContainer.appendChild(separator);
-      metadataContainer.appendChild(sourceSpan);
-    }
+    fragment.appendChild(separator);
+    fragment.appendChild(textSpan);
+    return fragment;
   }
 
-  // 2. Show Account Location
+  // Find the insert position - after the time link
+  // We want: Time/Date · [Location] · [Source] · Views
+  let insertPosition = timeLink.nextSibling;
+
+  // Skip past any existing separators/dots right after the time
+  while (
+    insertPosition &&
+    insertPosition.textContent &&
+    insertPosition.textContent.trim() === "·"
+  ) {
+    insertPosition = insertPosition.nextSibling;
+  }
+
+  // 1. Show Account Location FIRST (closer to time)
   if (config.showAccountLocation && !focusedTweet.dataset.tweekLocation) {
     // Try to get location from cache by tweet ID first
     let location = locationCache.get(tweetId);
@@ -1411,21 +1432,47 @@ function enhanceFocusedTweet() {
 
     if (location && location.trim()) {
       focusedTweet.dataset.tweekLocation = "true";
+      const locationItem = createMetadataItem(location, "tweek-location");
 
-      // Create location element
-      const separator = document.createElement("span");
-      separator.setAttribute("aria-hidden", "true");
-      separator.style.color = "rgb(113, 118, 123)";
-      separator.style.margin = "0 4px";
-      separator.textContent = " · ";
+      // Insert after time link
+      if (insertPosition) {
+        metadataContainer.insertBefore(locationItem, insertPosition);
+      } else {
+        metadataContainer.appendChild(locationItem);
+      }
+    }
+  }
 
-      const locSpan = document.createElement("span");
-      locSpan.style.color = "rgb(113, 118, 123)";
-      locSpan.style.fontSize = "15px";
-      locSpan.textContent = location;
+  // 2. Restore Tweet Source SECOND (after location, before views)
+  if (config.restoreTweetSource && !focusedTweet.dataset.tweekSource) {
+    // Get source from tweetDataCache (populated from API responses)
+    const tweetData = tweetDataCache.get(tweetId);
+    const sourceText = tweetData?.source;
 
-      metadataContainer.appendChild(separator);
-      metadataContainer.appendChild(locSpan);
+    // Also check mediaCache for source (fallback)
+    let source = sourceText;
+    if (!source) {
+      const mediaData = mediaCache.get(tweetId);
+      source = mediaData?.source;
+    }
+
+    // Only display if we have REAL source data - never fake it
+    if (source && source.trim()) {
+      focusedTweet.dataset.tweekSource = "true";
+      const sourceItem = createMetadataItem(source, "tweek-source");
+
+      // Insert after location (or after time if no location)
+      const locationSpan = metadataContainer.querySelector(".tweek-location");
+      if (locationSpan && locationSpan.nextSibling) {
+        metadataContainer.insertBefore(
+          sourceItem,
+          locationSpan.nextSibling.nextSibling || insertPosition
+        );
+      } else if (insertPosition) {
+        metadataContainer.insertBefore(sourceItem, insertPosition);
+      } else {
+        metadataContainer.appendChild(sourceItem);
+      }
     }
   }
 }
