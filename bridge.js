@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS = {
   hideExploreContent: true,
   blueBird: true,
   cleanNav: true,
-  restoreTweetSource: true,
+  restoreTweetSource: false,
   showAccountLocation: true,
   hideFloatingButton: true,
   hideDiscoverMore: false,

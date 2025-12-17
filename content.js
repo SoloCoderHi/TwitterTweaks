@@ -34,7 +34,7 @@ let config = {
   hideExploreContent: true,
   blueBird: true,
   cleanNav: true,
-  restoreTweetSource: true,
+  restoreTweetSource: false,
   showAccountLocation: true,
   hideFloatingButton: true,
   hideDiscoverMore: false,
@@ -271,10 +271,14 @@ function extractTweetData(obj) {
     if (userLegacy) {
       username = userLegacy.screen_name;
       location = userLegacy.location;
+      // Debug log
+      console.log(
+        `🐦 Tweek: User @${username} location: "${location || "NOT SET"}"`
+      );
       // Cache user data by username for later lookup
-      if (username && location) {
+      if (username) {
         userDataCache.set(username.toLowerCase(), {
-          location,
+          location: location || "",
           name: userLegacy.name,
         });
       }
@@ -282,9 +286,12 @@ function extractTweetData(obj) {
   } else if (obj.user) {
     username = obj.user.screen_name;
     location = obj.user.location;
-    if (username && location) {
+    console.log(
+      `🐦 Tweek: User @${username} location: "${location || "NOT SET"}"`
+    );
+    if (username) {
       userDataCache.set(username.toLowerCase(), {
-        location,
+        location: location || "",
         name: obj.user.name,
       });
     }
@@ -305,6 +312,9 @@ function extractTweetData(obj) {
   // Make sure location is in locationCache too
   if (location && location.trim()) {
     locationCache.set(tweetId, location);
+    console.log(
+      `🐦 Tweek: Cached location for tweet ${tweetId}: "${location}"`
+    );
   }
 }
 
@@ -586,22 +596,24 @@ function applyStyles() {
     `;
   }
 
-  // Hide Top Live / Spaces / "Available for shows"
+  // Hide Top Live / Spaces / Broadcasts
   if (config.hideTopLive) {
     css += `
-      /* Hide "Top Live", Spaces, and streaming sections */
-      [aria-label*="Top Live"],
-      [aria-label*="Live"][role="group"],
-      [data-testid="cellInnerDiv"]:has([aria-label*="Live"]),
-      [data-testid="cellInnerDiv"]:has(a[href*="/i/broadcasts"]),
-      [data-testid="cellInnerDiv"]:has(a[href*="/i/spaces"]),
-      /* Hide "Available for shows" / Spaces bar */
-      [data-testid="placementTracking"]:has([href*="/i/spaces"]),
-      [data-testid="cellInnerDiv"]:has([data-testid="AudioSpaceCard"]),
-      div[data-testid="cellInnerDiv"]:has([href*="spaces"]),
-      /* Hide purple Spaces/Live bars */
-      article:has([href*="/i/spaces"]):not(:has([data-testid="tweetText"])),
-      [role="article"]:has(a[href*="/i/spaces"]):not(:has([data-testid="tweetPhoto"])):not(:has([data-testid="tweetText"])) {
+      /* Hide Spaces/Broadcast bars - ONLY target elements with Broadcast/Spaces in aria-label */
+      /* Direct button hiding */
+      button[aria-label*="Broadcast"][aria-label*="hosting"],
+      button[aria-label*="Broadcast"][aria-label*="Hosted"],
+      
+      /* Hide parent container of broadcast buttons */
+      div[role="presentation"]:has(> [data-testid="placementTracking"] button[aria-label*="Broadcast"]),
+      
+      /* Hide by class structure from user's HTML */
+      .r-14tvyh0.r-cpa5s6:has(button[aria-label*="Broadcast"]),
+      .r-14tvyh0.r-cpa5s6:has([data-testid="pill-contents-container"]),
+      
+      /* Hide cellInnerDiv containing only broadcasts */
+      [data-testid="cellInnerDiv"]:has(a[href*="/i/broadcasts"]):not(:has([data-testid="tweetText"])),
+      [data-testid="cellInnerDiv"]:has(a[href*="/i/spaces"]):not(:has([data-testid="tweetText"])) {
         display: none !important;
       }
     `;
@@ -621,6 +633,19 @@ function applyStyles() {
     `;
   }
 
+  // Hide Tweet Source Labels (from timeline) when toggle is OFF
+  if (!config.restoreTweetSource) {
+    css += `
+      /* Hide Twitter's native tweet source labels in timeline and focused tweets */
+      /* The source appears as a span after the · separator following the timestamp */
+      article [data-testid="User-Name"] a[href*="/status/"] + span + span,
+      article a[href*="/status/"] time + span,
+      /* Hide "· Twitter for X" pattern */
+      article span:has(+ a[role="link"][href*="/status/"]) ~ span:not(:has(time)):not([data-testid]) {
+        display: none !important;
+      }
+    `;
+  }
   // Hide Bookmarks Button (in action bar) - hide when showBookmarkButton is OFF
   if (!config.showBookmarkButton) {
     css += `
@@ -1336,10 +1361,30 @@ function enhanceVideo(video) {
 // FOCUSED TWEET ENHANCEMENTS
 // ==========================================
 function enhanceFocusedTweet() {
-  // Find focused/expanded tweet
-  const focusedTweet =
-    document.querySelector('[data-testid="tweet"][tabindex="-1"]') ||
-    document.querySelector('article[data-testid="tweet"]');
+  // Find the FOCUSED tweet (the main tweet being viewed, not reply tweets)
+  // The focused tweet is typically the first tweet article on a /status/ page
+  // that contains the timestamp with date format like "12:00 PM · Dec 14, 2025"
+  const focusedTweets = document.querySelectorAll(
+    'article[data-testid="tweet"]'
+  );
+
+  let focusedTweet = null;
+  for (const tweet of focusedTweets) {
+    // The focused tweet has a time element with a datetime attribute
+    // and contains the full date format (not just relative time like "5h")
+    const time = tweet.querySelector("time");
+    if (time) {
+      const timeText = time.textContent || "";
+      // Check if this is a full timestamp (contains AM/PM and year)
+      if (
+        timeText.includes("M") &&
+        (timeText.includes(",") || timeText.includes("·"))
+      ) {
+        focusedTweet = tweet;
+        break;
+      }
+    }
+  }
 
   if (!focusedTweet) return;
 
